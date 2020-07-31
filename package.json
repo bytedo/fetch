@@ -1,0 +1,23 @@
+{
+  "name": "@bytedo/fetch",
+  "version": "1.0.0",
+  "description": "全新的ajax封装。分2个版本, 一个基于XMLHttpRequest, 一个基于window.fetch",
+  "main": "dist/index.js",
+  "directories": {
+    "lib": "dist/lib"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/bytedo/fetch.git"
+  },
+  "keywords": ["fetch", "axois", "request", "ajax"],
+  "author": "yutent",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/bytedo/fetch/issues"
+  },
+  "homepage": "https://github.com/bytedo/fetch#readme"
+}
