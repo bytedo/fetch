@@ -5,20 +5,20 @@
  * @version $Id$
  */
 
-import Format from './lib/format'
+import Format from './lib/format.js'
 
 // 本地协议/头 判断正则
-const rlocalProtocol = /^(?:about|app|app-storage|.+-extension|file|res|widget):$/
+// const rlocalProtocol = /^(?:about|app|app-storage|.+-extension|file|res|widget):$/
 const log = console.log
 
 const noop = function(e, res) {
   this.defer.resolve(res)
 }
 
-let isLocal = false
-try {
-  isLocal = rlocalProtocol.test(location.protocol)
-} catch (e) {}
+// let isLocal = false
+// try {
+//   isLocal = rlocalProtocol.test(location.protocol)
+// } catch (e) {}
 
 let originAnchor = document.createElement('a')
 originAnchor.href = location.href
@@ -69,9 +69,9 @@ class _Request {
     // url规范化
     url = url.replace(/#.*$/, '')
 
-    if (request.BASE_URL) {
+    if (fetch.BASE_URL) {
       if (!/^([a-z]+:|\/\/)/.test(url)) {
-        url = request.BASE_URL + url
+        url = fetch.BASE_URL + url
       }
     }
 
@@ -84,7 +84,7 @@ class _Request {
       method,
       headers: {},
       data: {},
-      dataType: 'text',
+      dataType: 'blob',
       withCredentials: false // 跨域选项,是否验证凭证
     }
 
@@ -93,7 +93,7 @@ class _Request {
       this.cancel = true
       this.xhr.abort()
     }
-    this.__next__(Object.assign({}, request.__INIT__, param))
+    this.__next__(Object.assign({}, fetch.__INIT__, param))
     return this.defer.promise
   }
 
@@ -412,34 +412,32 @@ class _Request {
   }
 }
 
-if (!window.request) {
-  window.request = {
-    get(url, param = {}) {
-      return new _Request(url, 'GET', param)
-    },
-    post(url, param = {}) {
-      return new _Request(url, 'POST', param)
-    },
-    upload(url, param = {}) {
-      param.formType = 'form-data'
-      return this.post(url, param)
-    },
-    download(url, param = {}) {
-      param.dataType = 'blob'
-      return this.get(url, param)
-    },
-    open(url, method = 'GET', param = {}) {
-      if (typeof method === 'object') {
-        param = method
-        method = 'GET'
-      }
-      return new _Request(url, method, param)
-    },
-    version: '2.0.0-normal',
-    init(param = {}) {
-      this.__INIT__ = param
-    }
+function _fetch(url, method = 'GET', param = {}) {
+  if (typeof method === 'object') {
+    param = method
+    method = 'GET'
   }
+  return new _Request(url, method, param)
 }
 
-export default request
+_fetch.get = function(url, param = {}) {
+  return new _Request(url, 'GET', param)
+}
+_fetch.post = function(url, param = {}) {
+  return new _Request(url, 'POST', param)
+}
+_fetch.upload = function(url, param = {}) {
+  param.formType = 'form-data'
+  return this.post(url, param)
+}
+_fetch.download = function(url, param = {}) {
+  param.dataType = 'blob'
+  return this.get(url, param)
+}
+
+_fetch.version = '2.0.0-normal'
+_fetch.init = function(param = {}) {
+  this.__INIT__ = param
+}
+
+export default _fetch

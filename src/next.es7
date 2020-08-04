@@ -4,4 +4,4 @@
  * @date 2020/07/31 18:59:47
  */
 
-import Format from './lib/format'
+import Format from './lib/format.es7'
