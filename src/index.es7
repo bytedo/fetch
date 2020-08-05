@@ -60,7 +60,7 @@ Promise.defer = function() {
 class _Instance {}
 
 class _Request {
-  constructor(url = '', method = 'GET', options = {}) {
+  constructor(url = '', options = { method: 'GET' }) {
     if (!url) {
       throw new Error(ERRORS[10001])
     }
@@ -74,18 +74,15 @@ class _Request {
       }
     }
 
-    method = method.toUpperCase()
+    options.method = options.method.toUpperCase()
 
     this.xhr = new XMLHttpRequest()
     this.defer = Promise.defer()
 
     this.options = {
-      url,
-      method,
       headers: {},
       body: null,
-      dataType: 'blob',
-      cache: true,
+      cache: 'default',
       referrer: '',
       credentials: false, // 跨域选项,是否验证凭证
       signal: null, // 超时信号, 配置该项时, timeout不再生效
@@ -97,17 +94,35 @@ class _Request {
     //   this.cancel = true
     //   this.xhr.abort()
     // }
-    this.__next__(Object.assign({}, fetch.__INIT__, options))
+    Object.assign(this.options, fetch.__INIT__, options, { url })
+    this.__next__()
     return this.defer.promise
   }
 
-  __next__(options) {
+  __next__() {
+    var options = this.options
     var hasAttach = false // 是否有附件
+    var control = new AbortController()
     /* -------------------------------------------------------------- */
     /* ------------------------  1»» 配置头信息  ---------------------- */
     /* -------------------------------------------------------------- */
     if (options.headers) {
       Object.assign(this.options.headers, options.headers)
+      if (!options.headers['content-type']) {
+        options.headers['content-type'] =
+          'application/x-www-form-urlencoded; charset=UTF-8'
+      }
+    }
+
+    // 如果有传入signal, 则删除timeout配置
+    if (options.signal) {
+      delete options.timeout
+    } else {
+      options.signal = control.signal
+    }
+    options.signal.onabort = _ => {
+      this.cancel = true
+      this.xhr.abort()
     }
   }
 }
