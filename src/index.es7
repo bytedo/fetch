@@ -60,7 +60,7 @@ Promise.defer = function() {
 class _Instance {}
 
 class _Request {
-  constructor(url = '', options = { method: 'GET' }) {
+  constructor(url = '', options = {}) {
     if (!url) {
       throw new Error(ERRORS[10001])
     }
@@ -74,13 +74,16 @@ class _Request {
       }
     }
 
-    options.method = options.method.toUpperCase()
+    options.method = (options.method || 'get').toUpperCase()
 
     this.xhr = new XMLHttpRequest()
     this.defer = Promise.defer()
 
     this.options = {
-      headers: {},
+      headers: {
+        'X-Requested-With': 'XMLHttpRequest',
+        'content-type': FORM_TYPES.form
+      },
       body: null,
       cache: 'default',
       referrer: '',
@@ -101,19 +104,12 @@ class _Request {
 
   __next__() {
     var options = this.options
+    var params = null
     var hasAttach = false // 是否有附件
+    var crossDomain = false // 是否跨域
     var control = new AbortController()
-    /* -------------------------------------------------------------- */
-    /* ------------------------  1»» 配置头信息  ---------------------- */
-    /* -------------------------------------------------------------- */
-    if (options.headers) {
-      Object.assign(this.options.headers, options.headers)
-      if (!options.headers['content-type']) {
-        options.headers['content-type'] =
-          'application/x-www-form-urlencoded; charset=UTF-8'
-      }
-    }
 
+    /* ------------------------  1»» 处理超时  ---------------------- */
     // 如果有传入signal, 则删除timeout配置
     if (options.signal) {
       delete options.timeout
@@ -124,6 +120,67 @@ class _Request {
       this.cancel = true
       this.xhr.abort()
     }
+
+    /* --------------------------  2»» 请求的内容 --------------------- */
+    if (options.body) {
+      var type = typeof options.body
+      switch (type) {
+        case 'number':
+        case 'string':
+          this.__type__('text')
+          params = options.body
+          break
+        case 'object':
+          // 解析表单DOM
+          if (options.body.nodeName === 'FORM') {
+            options.method = options.body.method.toUpperCase() || 'POST'
+
+            params = Format.parseForm(options.body)
+            hasAttach = params.constructor === FormData
+
+            if (hasAttach) {
+              delete options.headers['content-type']
+            }
+            // 如果是一个 FormData对象
+            // 则直接改为POST
+          } else if (options.body.constructor === FormData) {
+            hasAttach = true
+            options.method = 'POST'
+            params = options.body
+            delete options.headers['content-type']
+          } else {
+            // 有附件,则改为FormData
+            if (hasAttach) {
+              params = Format.mkFormData(options.body)
+            } else {
+              params = options.body
+            }
+          }
+      }
+    }
+
+    /* --------------------------  3»» 处理跨域  --------------------- */
+    try {
+      let $a = document.createElement('a')
+      $a.href = options.url
+
+      crossDomain =
+        location.protocol !== $a.protocol || location.host !== $a.host
+    } catch (err) {}
+
+    if (crossDomain) {
+      if (options.credentials) {
+        this.xhr.withCredentials = true
+      } else {
+        delete options.headers['X-Requested-With']
+      }
+    }
+
+    /* ------------- 4»» 根据method类型, 处理g表单数据  ---------------- */
+  }
+
+  __type__(type) {
+    this.options.headers['content-type'] = FORM_TYPES[type]
   }
 }
 
@@ -155,13 +212,8 @@ class _Response {
   }
 }
 
-function _fetch(url, method = 'GET', param = {}) {
-  //
-  if (typeof method === 'object') {
-    param = method
-    method = 'GET'
-  }
-  return new _Request(url, method, param)
+function _fetch(url, param) {
+  return new _Request(url, param)
 }
 
 export default _fetch
