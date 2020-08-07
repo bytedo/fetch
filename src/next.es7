@@ -4,4 +4,208 @@
  * @date 2020/07/31 18:59:47
  */
 
-import Format from './lib/format.es7'
+import { Format, toS } from './lib/format.js'
+
+const noop = function(e, res) {
+  this.defer.resolve(res)
+}
+
+const NOBODY_METHODS = ['GET', 'HEAD']
+const FORM_TYPES = {
+  form: 'application/x-www-form-urlencoded; charset=UTF-8',
+  json: 'application/json; charset=UTF-8',
+  text: 'text/plain; charset=UTF-8'
+}
+
+class _Request {
+  constructor(url = '', options = {}, { BASE_URL, __INIT__ }) {
+    if (!url) {
+      throw new Error('Argument url is required')
+    }
+
+    // url规范化
+    url = url.replace(/#.*$/, '')
+
+    if (BASE_URL) {
+      if (!/^([a-z]+:|\/\/)/.test(url)) {
+        url = BASE_URL + url
+      }
+    }
+
+    options.method = (options.method || 'get').toUpperCase()
+
+    this.options = {
+      headers: {
+        'X-Requested-With': 'XMLHttpRequest',
+        'content-type': FORM_TYPES.form
+      },
+      body: null,
+      cache: 'default',
+      signal: null, // 超时信号, 配置该项时, timeout不再生效
+      timeout: 30000 // 超时时间, 单位毫秒, 默认30秒
+    }
+
+    if (!options.signal) {
+      this.control = new AbortController()
+      options.signal = this.control.signal
+    }
+
+    if (__INIT__.headers && options.headers) {
+      Object.assign(__INIT__.headers, options.headers)
+    }
+
+    Object.assign(this.options, __INIT__, options, { url })
+
+    return this.__next__()
+  }
+
+  __next__() {
+    var options = this.options
+    var params = null
+    var hasAttach = false // 是否有附件
+    var crossDomain = false // 是否跨域
+    var noBody = NOBODY_METHODS.includes(options.method)
+
+    /* --------------------------  1»» 请求的内容 --------------------- */
+    if (options.body) {
+      var type = typeof options.body
+      switch (type) {
+        case 'number':
+        case 'string':
+          this.__type__('text')
+          params = options.body
+          break
+        case 'object':
+          // 解析表单DOM
+          if (options.body.nodeName === 'FORM') {
+            options.method = options.body.method.toUpperCase() || 'POST'
+
+            params = Format.parseForm(options.body)
+            hasAttach = params.constructor === FormData
+
+            // 如果是一个 FormData对象,且为不允许携带body的方法,则直接改为POST
+          } else if (options.body.constructor === FormData) {
+            hasAttach = true
+            if (noBody) {
+              options.method = 'POST'
+            }
+            params = options.body
+          } else {
+            for (let k in options.body) {
+              if (toS.call(options.body[k]) === '[object File]') {
+                hasAttach = true
+                break
+              }
+            }
+            // 有附件,则改为FormData
+            if (hasAttach) {
+              if (noBody) {
+                options.method = 'POST'
+              }
+              params = Format.mkFormData(options.body)
+            } else {
+              params = options.body
+            }
+          }
+      }
+    }
+    if (hasAttach) {
+      delete options.headers['content-type']
+    }
+
+    /* --------------------------  2»» 处理跨域  --------------------- */
+    try {
+      let $a = document.createElement('a')
+      $a.href = options.url
+
+      crossDomain =
+        location.protocol !== $a.protocol || location.host !== $a.host
+    } catch (err) {}
+
+    if (crossDomain && options.credentials === 'omit') {
+      delete options.headers['X-Requested-With']
+    }
+
+    /* ------------- 3»» 根据method类型, 处理表单数据  ---------------- */
+
+    // 拼接到url上
+    if (noBody) {
+      params = Format.param(params)
+      if (params) {
+        options.url += (~options.url.indexOf('?') ? '&' : '?') + params
+      }
+      if (options.cache === 'no-store') {
+        options.url +=
+          (~options.url.indexOf('?') ? '&' : '?') + '_t_=' + Date.now()
+      }
+    } else {
+      if (!hasAttach) {
+        if (~options.headers['content-type'].indexOf('json')) {
+          params = JSON.stringify(params)
+        } else {
+          params = Format.param(params)
+        }
+      }
+    }
+
+    /* -----------------   4»» 超时处理  -----------------------*/
+    if (options.timeout && options.timeout > 0) {
+      this.timer = setTimeout(_ => {
+        this.abort()
+      }, options.timeout)
+
+      delete options.timeout
+    }
+
+    /* -----------------    5»» 构造请求    ------------------- */
+    var url = options.url
+    delete options.url
+    for (let k in options) {
+      if (
+        options[k] === null ||
+        options[k] === undefined ||
+        options[k] === ''
+      ) {
+        delete options[k]
+      }
+    }
+    return window
+      .fetch(url, options)
+      .then(r => {
+        clearTimeout(this.timer)
+        var isSucc = r.status >= 200 && r.status < 400
+        if (isSucc) {
+          return r
+        } else {
+          return Promise.reject(r)
+        }
+      })
+      .catch(e => {
+        clearTimeout(this.timer)
+        return Promise.reject(e)
+      })
+  }
+
+  abort() {
+    this.control.abort()
+  }
+
+  __type__(type) {
+    this.options.headers['content-type'] = FORM_TYPES[type]
+  }
+}
+
+const _fetch = function(url, options) {
+  return new _Request(url, options, {
+    BASE_URL: _fetch.BASE_URL,
+    __INIT__: _fetch.__INIT__ || Object.create(null)
+  })
+}
+
+_fetch.create = function(BASE_URL, __INIT__ = Object.create(null)) {
+  return function(url, options) {
+    return new _Request(url, options, { BASE_URL, __INIT__ })
+  }
+}
+
+export default _fetch

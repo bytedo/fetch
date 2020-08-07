@@ -4,9 +4,7 @@
  * @date 2020/08/03 17:05:10
  */
 
-import Format from './lib/format.js'
-
-const log = console.log
+import { Format, toS } from './lib/format.js'
 
 const noop = function(e, res) {
   this.defer.resolve(res)
@@ -30,24 +28,6 @@ const ERRORS = {
   10504: 'Connected timeout'
 }
 
-const CONVERT = {
-  text(val) {
-    return val
-  },
-  xml(val, xml) {
-    return xml !== undefined ? xml : Format.parseXML(val)
-  },
-  html(val) {
-    return Format.parseHTML(val)
-  },
-  json(val) {
-    return JSON.parse(val)
-  },
-  script(val) {
-    return Format.parseJS(val)
-  }
-}
-
 Promise.defer = function() {
   var _ = {}
   _.promise = new Promise(function(y, n) {
@@ -57,10 +37,8 @@ Promise.defer = function() {
   return _
 }
 
-class _Instance {}
-
 class _Request {
-  constructor(url = '', options = {}) {
+  constructor(url = '', options = {}, { BASE_URL, __INIT__ }) {
     if (!url) {
       throw new Error(ERRORS[10001])
     }
@@ -68,9 +46,9 @@ class _Request {
     // url规范化
     url = url.replace(/#.*$/, '')
 
-    if (fetch.BASE_URL) {
+    if (BASE_URL) {
       if (!/^([a-z]+:|\/\/)/.test(url)) {
-        url = fetch.BASE_URL + url
+        url = BASE_URL + url
       }
     }
 
@@ -86,18 +64,25 @@ class _Request {
       },
       body: null,
       cache: 'default',
-      referrer: '',
       credentials: false, // 跨域选项,是否验证凭证
       signal: null, // 超时信号, 配置该项时, timeout不再生效
       timeout: 30000 // 超时时间, 单位毫秒, 默认30秒
     }
 
-    // 取消网络请求
-    // this.defer.promise.abort = () => {
-    //   this.cancel = true
-    //   this.xhr.abort()
-    // }
-    Object.assign(this.options, fetch.__INIT__, options, { url })
+    if (!options.signal) {
+      var control = new AbortController()
+      options.signal = control.signal
+    }
+    this.defer.promise.abort = function() {
+      control.abort()
+    }
+
+    if (__INIT__.headers && options.headers) {
+      Object.assign(__INIT__.headers, options.headers)
+    }
+
+    Object.assign(this.options, __INIT__, options, { url })
+
     this.__next__()
     return this.defer.promise
   }
@@ -107,15 +92,9 @@ class _Request {
     var params = null
     var hasAttach = false // 是否有附件
     var crossDomain = false // 是否跨域
-    var control = new AbortController()
+    var noBody = NOBODY_METHODS.includes(options.method)
 
-    /* ------------------------  1»» 处理超时  ---------------------- */
-    // 如果有传入signal, 则删除timeout配置
-    if (options.signal) {
-      delete options.timeout
-    } else {
-      options.signal = control.signal
-    }
+    /* ------------------------  1»» 处理signal  ---------------------- */
     options.signal.onabort = _ => {
       this.cancel = true
       this.xhr.abort()
@@ -138,25 +117,34 @@ class _Request {
             params = Format.parseForm(options.body)
             hasAttach = params.constructor === FormData
 
-            if (hasAttach) {
-              delete options.headers['content-type']
-            }
-            // 如果是一个 FormData对象
-            // 则直接改为POST
+            // 如果是一个 FormData对象,且为不允许携带body的方法,则直接改为POST
           } else if (options.body.constructor === FormData) {
             hasAttach = true
-            options.method = 'POST'
+            if (noBody) {
+              options.method = 'POST'
+            }
             params = options.body
-            delete options.headers['content-type']
           } else {
+            for (let k in options.body) {
+              if (toS.call(options.body[k]) === '[object File]') {
+                hasAttach = true
+                break
+              }
+            }
             // 有附件,则改为FormData
             if (hasAttach) {
+              if (noBody) {
+                options.method = 'POST'
+              }
               params = Format.mkFormData(options.body)
             } else {
               params = options.body
             }
           }
       }
+    }
+    if (hasAttach) {
+      delete options.headers['content-type']
     }
 
     /* --------------------------  3»» 处理跨域  --------------------- */
@@ -176,21 +164,172 @@ class _Request {
       }
     }
 
-    /* ------------- 4»» 根据method类型, 处理g表单数据  ---------------- */
+    /* ------------- 4»» 根据method类型, 处理表单数据  ---------------- */
+
+    // 拼接到url上
+    if (noBody) {
+      params = Format.param(params)
+      if (params) {
+        options.url += (~options.url.indexOf('?') ? '&' : '?') + params
+      }
+      if (options.cache === 'no-store') {
+        options.url +=
+          (~options.url.indexOf('?') ? '&' : '?') + '_t_=' + Date.now()
+      }
+    } else {
+      if (!hasAttach) {
+        if (~options.headers['content-type'].indexOf('json')) {
+          params = JSON.stringify(params)
+        } else {
+          params = Format.param(params)
+        }
+      }
+    }
+
+    /* -----------------     5»» 设置响应的数据类型   ---------------- */
+    // 统一使用blob, 再转为其他的
+    this.xhr.responseType = 'blob'
+
+    /* -----------------    6»» 构造请求    ------------------- */
+    // 6.1
+    this.xhr.onreadystatechange = ev => {
+      if (options.timeout > 0) {
+        options['time' + this.xhr.readyState] = ev.timeStamp
+        if (this.xhr.readyState === 4) {
+          options.isTimeout = options.time4 - options.time1 > options.timeout
+        }
+      }
+
+      if (this.xhr.readyState !== 4) {
+        return
+      }
+
+      this.__dispatch__(options.isTimeout)
+    }
+
+    // 6.2»» 初始化xhr
+    this.xhr.open(options.method, options.url)
+
+    // 6.3»» 设置头信息
+    for (let k in options.headers) {
+      this.xhr.setRequestHeader(k, options.headers[k])
+    }
+
+    // 6.4»» 发起网络请求
+    this.xhr.send(params)
+
+    // 6.5»» 超时处理
+    if (options.timeout && options.timeout > 0) {
+      this.xhr.timeout = options.timeout
+    }
   }
 
   __type__(type) {
     this.options.headers['content-type'] = FORM_TYPES[type]
   }
+
+  __dispatch__(isTimeout) {
+    let result = {
+      status: 200,
+      statusText: 'ok',
+      body: '',
+      headers: Object.create(null)
+    }
+
+    // 主动取消
+    if (this.cancel) {
+      return this.__cancel__()
+    }
+
+    // 超时
+    if (isTimeout) {
+      return this.__timeout__()
+    }
+
+    // 是否请求成功(resful规范)
+    let isSucc = this.xhr.status >= 200 && this.xhr.status < 400
+    let headers = this.xhr.getAllResponseHeaders().split('\n') || []
+
+    //处理返回的 Header, 拿到content-type
+    for (let it of headers) {
+      it = it.trim()
+      if (it) {
+        it = it.split(':')
+        let k = it.shift().toLowerCase()
+        it = it.join(':').trim()
+        result.headers[k] = it
+      }
+    }
+
+    if (isSucc) {
+      result.status = this.xhr.status
+      if (result.status === 204) {
+        result.statusText = ERRORS[10204]
+      } else if (result.status === 304) {
+        result.statusText = ERRORS[10304]
+      }
+    } else {
+      result.status = this.xhr.status || 500
+      result.statusText = this.xhr.statusText || ERRORS[10500]
+    }
+
+    result.body = this.xhr.response
+
+    this.__success__(isSucc, result)
+  }
+
+  __success__(isSucc, result) {
+    var response = new _Response(
+      result.status,
+      result.statusText,
+      result.body,
+      result.headers
+    )
+
+    if (isSucc) {
+      this.defer.resolve(response)
+    } else {
+      this.defer.reject(response)
+    }
+    delete this.xhr
+    delete this.options
+    delete this.defer
+  }
+
+  __cancel__(result) {
+    var response = new _Response(0, ERRORS[10100], Object.create(null))
+
+    this.defer.reject(response)
+
+    delete this.xhr
+    delete this.options
+    delete this.defer
+  }
+
+  __timeout__(result) {
+    var response = new _Response(504, ERRORS[10504], Object.create(null))
+
+    this.defer.reject(response)
+
+    delete this.xhr
+    delete this.options
+    delete this.defer
+  }
 }
 
 class _Response {
-  constructor(status = 200, data = null, headers = {}) {
+  constructor(status = 200, statusText = 'OK', data = null, headers = {}) {
     this.status = status
-    this.statusText = 'OK'
-    this.ok = true
+    this.statusText = statusText
+    this.ok = status >= 200 && status < 400
     this.headers = headers
-    this.__R__ = data
+
+    Object.defineProperty(this, '__R__', {
+      value: data,
+      writable: true,
+      enumerable: false,
+      configurable: true
+    })
   }
 
   text() {
@@ -212,8 +351,17 @@ class _Response {
   }
 }
 
-function _fetch(url, param) {
-  return new _Request(url, param)
+const _fetch = function(url, options) {
+  return new _Request(url, options, {
+    BASE_URL: _fetch.BASE_URL,
+    __INIT__: _fetch.__INIT__ || Object.create(null)
+  })
+}
+
+_fetch.create = function(BASE_URL, __INIT__ = Object.create(null)) {
+  return function(url, options) {
+    return new _Request(url, options, { BASE_URL, __INIT__ })
+  }
 }
 
 export default _fetch
