@@ -77,11 +77,18 @@ class _Request {
       control.abort()
     }
 
-    if (__INIT__.headers && options.headers) {
-      Object.assign(__INIT__.headers, options.headers)
+    var headers = this.options.headers
+
+    if (__INIT__.headers) {
+      Object.assign(headers, __INIT__.headers)
     }
 
-    Object.assign(this.options, __INIT__, options, { url })
+    if (options.headers) {
+      Object.assign(headers, options.headers)
+      delete options.headers
+    }
+
+    Object.assign(this.options, __INIT__, options, { url, headers })
 
     this.__next__()
     return this.defer.promise
