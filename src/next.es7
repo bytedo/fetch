@@ -6,21 +6,29 @@
 
 import { Format, toS } from './lib/format.js'
 
-const noop = function(e, res) {
-  this.defer.resolve(res)
-}
-
+const NATIVE_FETCH = window.fetch
 const NOBODY_METHODS = ['GET', 'HEAD']
 const FORM_TYPES = {
   form: 'application/x-www-form-urlencoded; charset=UTF-8',
   json: 'application/json; charset=UTF-8',
   text: 'text/plain; charset=UTF-8'
 }
+const ERRORS = {
+  10001: 'Argument url is required',
+  10012: 'Parse error',
+  10100: 'Request canceled',
+  10104: 'Request pending...',
+  10200: 'Ok',
+  10204: 'No content',
+  10304: 'Not modified',
+  10500: 'Internal Server Error',
+  10504: 'Connected timeout'
+}
 
 class _Request {
   constructor(url = '', options = {}, { BASE_URL, __INIT__ }) {
     if (!url) {
-      throw new Error('Argument url is required')
+      throw new Error(ERRORS[10001])
     }
 
     // url规范化
@@ -176,8 +184,7 @@ class _Request {
         delete options[k]
       }
     }
-    return window
-      .fetch(url, options)
+    return NATIVE_FETCH(url, options)
       .then(r => {
         clearTimeout(this.timer)
         var isSucc = r.status >= 200 && r.status < 400

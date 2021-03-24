@@ -6,10 +6,6 @@
 
 import { Format, toS } from './lib/format.js'
 
-const noop = function(e, res) {
-  this.defer.resolve(res)
-}
-
 const NOBODY_METHODS = ['GET', 'HEAD']
 const FORM_TYPES = {
   form: 'application/x-www-form-urlencoded; charset=UTF-8',
@@ -286,12 +282,8 @@ class _Request {
   }
 
   __success__(isSucc, result) {
-    var response = new _Response(
-      result.status,
-      result.statusText,
-      result.body,
-      result.headers
-    )
+    var { body, status, statusText, headers } = result
+    var response = new Response(body, { status, statusText, headers })
 
     if (isSucc) {
       this.defer.resolve(response)
@@ -304,7 +296,10 @@ class _Request {
   }
 
   __cancel__(result) {
-    var response = new _Response(0, ERRORS[10100], Object.create(null))
+    var response = new Response('', {
+      status: 0,
+      statusText: ERRORS[10100]
+    })
 
     this.defer.reject(response)
 
@@ -314,47 +309,16 @@ class _Request {
   }
 
   __timeout__(result) {
-    var response = new _Response(504, ERRORS[10504], Object.create(null))
+    var response = new Response('', {
+      status: 504,
+      statusText: ERRORS[10504]
+    })
 
     this.defer.reject(response)
 
     delete this.xhr
     delete this.options
     delete this.defer
-  }
-}
-
-class _Response {
-  constructor(status = 200, statusText = 'OK', data = null, headers = {}) {
-    this.status = status
-    this.statusText = statusText
-    this.ok = status >= 200 && status < 400
-    this.headers = headers
-
-    Object.defineProperty(this, '__R__', {
-      value: data,
-      writable: true,
-      enumerable: false,
-      configurable: true
-    })
-  }
-
-  text() {
-    return this.__R__.text()
-  }
-
-  json() {
-    return this.__R__.text().then(t => {
-      return JSON.parse(t)
-    })
-  }
-
-  blob() {
-    return this.__R__
-  }
-
-  arrayBuffer() {
-    return this.__R__.arrayBuffer()
   }
 }
 
