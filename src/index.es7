@@ -276,7 +276,7 @@ class _Request {
       result.statusText = this.xhr.statusText || ERRORS[10500]
     }
 
-    result.body = this.xhr.response
+    result.body = result.status === 204 ? null : this.xhr.response
 
     this.__success__(isSucc, result)
   }
